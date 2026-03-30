@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notiva</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/easymde/dist/easymde.min.css">
+    <script src="https://unpkg.com/easymde/dist/easymde.min.js"></script>
+
+    <style>
+        :root {
+            --bg: #f5f7fa;
+            --sidebar-bg: #ffffff;
+            --main-bg: #ffffff;
+            --accent: #0366d6;
+            --text: #24292e;
+            --border: #e1e4e8;
+            --hover: #f0f3f6;
+            --danger: #d73a49;
+        }
+
+        [data-theme="dark"] {
+            --bg: #0d1117;
+            --sidebar-bg: #161b22;
+            --main-bg: #0d1117;
+            --accent: #58a6ff;
+            --text: #c9d1d9;
+            --border: #30363d;
+            --hover: #21262d;
+        }
+
+        body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); overflow: hidden; }
+
+        /* Sidebar */
+        #sidebar { width: 280px; background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; z-index: 10; }
+        .search-box { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--main-bg); color: var(--text); box-sizing: border-box; }
+        .note-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 4px; margin-bottom: 5px; transition: 0.2s; }
+        .note-item:hover { background: var(--hover); }
+        .tag-pill { display: inline-block; background: var(--accent); color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin: 0 4px 4px 0; cursor: pointer; }
+
+        /* Main Content */
+        #main-content { flex: 1; display: flex; flex-direction: column; padding: 15px; box-sizing: border-box; overflow-y: auto; }
+        .controls { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+        .controls input { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--main-bg); color: var(--text); }
+
+        /* EasyMDE Theme Overrides */
+        .editor-toolbar { border-color: var(--border) !important; background: var(--sidebar-bg) !important; border-radius: 6px 6px 0 0 !important; }
+        .editor-toolbar i { color: var(--text) !important; }
+        .CodeMirror { border-color: var(--border) !important; background: var(--main-bg) !important; color: var(--text) !important; border-radius: 0 0 6px 6px !important; min-height: 400px; }
+        
+        /* Dark mode specific for the editor */
+        [data-theme="dark"] .editor-toolbar i { color: #c9d1d9 !important; }
+        [data-theme="dark"] .editor-toolbar a:hover { background: #30363d !important; }
+    </style>
+</head>
+<body data-theme="light">
+
+<div id="sidebar">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin:0">My Notes</h3>
+        <button onclick="toggleTheme()" id="theme-btn" style="background:none; border:none; cursor:pointer; font-size:1.2rem;">🌙</button>
+    </div>
+    <input type="text" id="search" class="search-box" placeholder="Search notes..." oninput="renderList()">
+    <div id="tag-cloud" style="margin-bottom: 10px;"></div>
+    <div id="note-list" style="overflow-y: auto; flex: 1;"></div>
+</div>
+
+<div id="main-content">
+    <div class="controls">
+        <input type="text" id="note-title" placeholder="Note Title" style="flex: 2;">
+        <input type="text" id="note-tags" placeholder="Tags (comma separated)" style="flex: 1;">
+        <button onclick="saveNote()" style="background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Save</button>
+        <button onclick="deleteNote()" style="color: var(--danger); border: 1px solid var(--danger); background: none; border-radius: 6px; padding: 10px; cursor: pointer;">🗑️</button>
+        <button onclick="clearEditor()" style="padding: 10px; border: 1px solid var(--border); background: var(--main-bg); color: var(--text); border-radius: 6px; cursor: pointer;">New</button>
+    </div>
+
+    <textarea id="my-editor"></textarea>
+</div>
+
+<script>
+    let notes = JSON.parse(localStorage.getItem('notes')) || [];
+    let currentId = null;
+
+    // Initialize EasyMDE (The WYSIWYG Magic)
+    const easyMDE = new EasyMDE({
+        element: document.getElementById('my-editor'),
+        spellChecker: false,
+        autosave: { enabled: false },
+        placeholder: "Type your notes here...",
+        // sideBySideFullscreen: false,
+        toolbar: ["bold", "italic", "heading", "|", "quote", "unordered-list", "ordered-list", "|", "link", "image", "table", "|", "preview", "side-by-side", "fullscreen"],
+        status: false,
+        renderingConfig: {
+            singleLineBreaks: false,
+            codeSyntaxHighlighting: true,
+        },
+    });
+
+    // --- Theme Control ---
+    function toggleTheme() {
+        const theme = document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        setTheme(theme);
+    }
+
+    function setTheme(theme) {
+        document.body.setAttribute('data-theme', theme);
+        document.getElementById('theme-btn').innerText = theme === 'light' ? '🌙' : '☀️';
+        localStorage.setItem('theme', theme);
+        // Note: EasyMDE dark mode is handled via CSS variables above
+    }
+
+    // --- Note Management ---
+    function saveNote() {
+        const title = document.getElementById('note-title').value || "Untitled";
+        const content = easyMDE.value();
+        const tags = document.getElementById('note-tags').value.split(',').map(t => t.trim()).filter(t => t);
+        
+        const note = { id: currentId || Date.now(), title, content, tags, date: new Date().toLocaleDateString() };
+        
+        const idx = notes.findIndex(n => n.id === currentId);
+        if (idx > -1) notes[idx] = note; else notes.push(note);
+        
+        currentId = note.id;
+        localStorage.setItem('notes', JSON.stringify(notes));
+        renderList();
+    }
+
+    function deleteNote() {
+        if (!currentId) return;
+        if (confirm("Delete this note?")) {
+            notes = notes.filter(n => n.id !== currentId);
+            localStorage.setItem('notes', JSON.stringify(notes));
+            clearEditor();
+            renderList();
+        }
+    }
+
+    function renderList(tagFilter = null) {
+        const search = document.getElementById('search').value.toLowerCase();
+        const list = document.getElementById('note-list');
+        const tagCloud = document.getElementById('tag-cloud');
+        
+        list.innerHTML = '';
+        const allTags = [...new Set(notes.flatMap(n => n.tags))];
+        tagCloud.innerHTML = allTags.map(t => `<span class="tag-pill" onclick="renderList('${t}')">${t}</span>`).join('');
+
+        notes.filter(n => {
+            const matchesSearch = n.title.toLowerCase().includes(search) || n.content.toLowerCase().includes(search);
+            return tagFilter ? (matchesSearch && n.tags.includes(tagFilter)) : matchesSearch;
+        }).forEach(n => {
+            const div = document.createElement('div');
+            div.className = 'note-item';
+            div.innerHTML = `<strong>${n.title}</strong><br><small>${n.date}</small>`;
+            div.onclick = () => loadNote(n.id);
+            list.appendChild(div);
+        });
+    }
+
+    function loadNote(id) {
+        const n = notes.find(note => note.id === id);
+        currentId = n.id;
+        document.getElementById('note-title').value = n.title;
+        document.getElementById('note-tags').value = n.tags.join(', ');
+        easyMDE.value(n.content);
+    }
+
+    function clearEditor() {
+        currentId = null;
+        document.getElementById('note-title').value = '';
+        document.getElementById('note-tags').value = '';
+        easyMDE.value('');
+    }
+
+    window.onload = () => {
+        const theme = localStorage.getItem('theme') || 'light';
+        setTheme(theme);
+        renderList();
+    };
+</script>
+</body>
+</html>
